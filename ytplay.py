@@ -4,7 +4,7 @@ import os
 import signal
 import sys
 from concurrent.futures import CancelledError
-from functools import partial
+from weakref import WeakKeyDictionary
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +25,10 @@ def main():
 
 
 def cancel_futures_callback(*futures):
-    return partial(cancel_futures, *futures)
-
-
-def cancel_futures(*futures):
-    for future in futures:
-        future.cancel()
+    def cancel_futures():
+        for future in futures:
+            future.cancel()
+    return cancel_futures
 
 
 async def play_urls(file):
@@ -115,38 +113,40 @@ class Channel(asyncio.Queue):
 
 class AsyncProcesses:
 
-    processes = set()
+    processes = WeakKeyDictionary()
 
     @classmethod
     def wait_for_proc(cls, proc, *pipes):
-        wait_coro = cls._wait_for_proc(proc, *pipes)
-        wait_future = asyncio.ensure_future(wait_coro)
-        cls.add_proc(wait_future)
+        logger.debug('Set up wait for %s', proc)
+        wait_future = asyncio.ensure_future(proc.wait())
+        wait_future.add_done_callback(cls._close_pipes_callback(*pipes))
         wait_future.add_done_callback(cls.remove_proc)
+        cls.add_proc(wait_future, proc)
         return wait_future
 
     @classmethod
-    def add_proc(cls, future):
-        cls.processes.add(future)
+    def add_proc(cls, future, proc):
+        cls.processes[future] = proc
         logger.debug('number of procs: %d', len(cls.processes))
 
     @classmethod
     def remove_proc(cls, future):
-        cls.processes.discard(future)
+        cls.processes.pop(future, None)
         logger.debug('number of procs: %d', len(cls.processes))
 
     @staticmethod
-    async def _wait_for_proc(proc, *pipes):
-        logger.debug('Set up wait for %s', proc)
-        await proc.wait()
-        logger.debug('Cleaning up %s', proc)
-        for pipe in pipes:
-            os.close(pipe)
+    def _close_pipes_callback(*pipes):
+        def close_pipes(future):
+            for pipe in pipes:
+                os.close(pipe)
+        return close_pipes
 
     @classmethod
     def cleanup(cls):
         logger.debug('Cleaning up all processes')
-        cancel_futures(*list(cls.processes))
+        for future, proc in cls.processes.items():
+            future.cancel()
+            proc.terminate()
         cls.processes.clear()
 
 
