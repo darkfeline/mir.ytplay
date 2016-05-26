@@ -60,6 +60,7 @@ class Song:
 
     async def start_buffering(self):
         reader, writer = os.pipe()
+        logger.debug('Created pipe %d, %d', reader, writer)
         proc = await self.youtube_dl(self.url, writer)
         logger.info('Buffering %s %s', self, proc)
         AsyncProcesses.wait_for_proc(proc, writer)
@@ -138,6 +139,7 @@ class AsyncProcesses:
     def _close_pipes_callback(*pipes):
         def close_pipes(future):
             for pipe in pipes:
+                logger.debug('Closing pipe %d', pipe)
                 os.close(pipe)
         return close_pipes
 
