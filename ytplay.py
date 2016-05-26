@@ -11,10 +11,11 @@ logger = logging.getLogger(__name__)
 def main():
     logging.basicConfig(level='DEBUG')
     loop = asyncio.get_event_loop()
-    future = loop.create_task(url_player())
+    future = asyncio.ensure_future(url_player())
     loop.add_signal_handler(signal.SIGINT, cancel_futures_callback(future))
     try:
         loop.run_until_complete(future)
+        logger.info('Finished normally')
     finally:
         loop.close()
 
@@ -47,33 +48,17 @@ async def url_player():
     )
     input_stream = sys.stdin
     input_stream = await AsyncTextStream.make(input_stream)
-    buffer_channel = Channel()
     play_channel = Channel()
-    await asyncio.gather(
-        read_urls(input_stream, buffer_channel),
-        buffer_streams(buffer_channel, play_channel),
-        play_streams(play_channel),
-    )
-
-
-async def read_urls(input_stream, buffer_channel):
-    async with buffer_channel:
+    player_future = asyncio.ensure_future(play_streams(play_channel))
+    async with play_channel:
         async for video_url in input_stream:
             if not video_url:
                 break
             print(video_url)
             song = Song(video_url)
-            await buffer_channel.put(song)
-
-
-async def buffer_streams(buffer_channel, play_channel):
-    async with play_channel:
-        while True:
-            song = await buffer_channel.get()
-            if song is Channel.DONE:
-                break
             await song.download()
             await play_channel.put(song)
+    await player_future
 
 
 async def play_streams(play_channel):
@@ -92,10 +77,9 @@ class Song:
 
     async def download(self):
         reader, writer = os.pipe()
-        logger.info('Buffering %s', self)
         proc = await self.youtube_dl(self.url, writer)
-        loop = asyncio.get_event_loop()
-        loop.create_task(wait_for_proc(proc, writer))
+        logger.info('Buffering %s %s', self, proc)
+        asyncio.ensure_future(wait_for_proc(proc, writer))
         self.buffer = reader
 
     @staticmethod
@@ -106,8 +90,8 @@ class Song:
         )
 
     async def play(self):
-        logger.info('Playing %s', self)
         proc = await self.start_player(self.buffer)
+        logger.info('Playing %s %s', self, proc)
         await wait_for_proc(proc, self.buffer)
         logger.info('Player exited %s', self)
 
@@ -123,7 +107,9 @@ class Song:
 
 
 async def wait_for_proc(proc, *pipes):
+    logger.debug('Setup wait for proc %s', proc)
     await proc.wait()
+    logger.debug('Cleaning up proc %s', proc)
     for pipe in pipes:
         os.close(pipe)
 
