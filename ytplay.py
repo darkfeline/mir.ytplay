@@ -60,7 +60,7 @@ class Song:
 
     async def start_buffering(self):
         reader, writer = os.pipe()
-        logger.debug('Created pipe %d, %d', reader, writer)
+        logger.debug('Created pipe %d, %d for %s', reader, writer, self)
         proc = await self.youtube_dl(self.url, writer)
         logger.info('Buffering %s %s', self, proc)
         AsyncProcesses.wait_for_proc(proc, writer)
@@ -82,7 +82,7 @@ class Song:
     @staticmethod
     async def start_player(pipe):
         return await asyncio.create_subprocess_exec(
-            'mpv', '--no-terminal', '--no-video', '-',
+            'mpv', '--really-quiet', '--no-video', '-',
             stdin=pipe,
         )
 
@@ -128,12 +128,12 @@ class AsyncProcesses:
     @classmethod
     def add_proc(cls, future, proc):
         cls.processes[future] = proc
-        logger.debug('number of procs: %d', len(cls.processes))
 
     @classmethod
     def remove_proc(cls, future):
-        cls.processes.pop(future, None)
-        logger.debug('number of procs: %d', len(cls.processes))
+        proc = cls.processes.pop(future, None)
+        if proc is not None:
+            logger.debug('Removing %s', proc)
 
     @staticmethod
     def _close_pipes_callback(*pipes):
@@ -145,10 +145,10 @@ class AsyncProcesses:
 
     @classmethod
     def cleanup(cls):
-        logger.debug('Cleaning up all processes')
         for future, proc in cls.processes.items():
-            future.cancel()
+            logger.debug('Cleaning up %s', proc)
             proc.terminate()
+            future.cancel()
         cls.processes.clear()
 
 
