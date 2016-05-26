@@ -14,6 +14,7 @@ def main():
     loop = asyncio.get_event_loop()
     future = asyncio.ensure_future(play_urls(sys.stdin))
     loop.add_signal_handler(signal.SIGINT, cancel_futures_callback(future))
+    loop.add_signal_handler(signal.SIGINT, AsyncProcesses.cleanup)
     try:
         loop.run_until_complete(future)
         logger.info('Finished normally')
@@ -144,6 +145,7 @@ class AsyncProcesses:
 
     @classmethod
     def cleanup(cls):
+        logger.debug('Cleaning up all processes')
         cancel_futures(*list(cls.processes))
         cls.processes.clear()
 
