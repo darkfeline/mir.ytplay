@@ -2,8 +2,9 @@ import asyncio
 import logging
 import os
 import signal
-import stat
 import sys
+from concurrent.futures import CancelledError
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -11,59 +12,42 @@ logger = logging.getLogger(__name__)
 def main():
     logging.basicConfig(level='DEBUG')
     loop = asyncio.get_event_loop()
-    future = asyncio.ensure_future(url_player())
+    future = asyncio.ensure_future(play_urls(sys.stdin))
     loop.add_signal_handler(signal.SIGINT, cancel_futures_callback(future))
     try:
         loop.run_until_complete(future)
         logger.info('Finished normally')
+    except CancelledError:
+        pass
     finally:
         loop.close()
 
 
 def cancel_futures_callback(*futures):
-    def cancel_futures():
-        logger.info('Canceling futures')
-        loop = asyncio.get_event_loop()
-        for future in futures:
-            future.cancel()
-            loop.run_until_complete(future)
-    return cancel_futures
+    return partial(cancel_futures, *futures)
 
 
-_MODES = [
-    ('FIFO', stat.S_ISFIFO),
-    ('SOCK', stat.S_ISSOCK),
-    ('CHR', stat.S_ISCHR),
-    ('BLK', stat.S_ISBLK),
-    ('REG', stat.S_ISREG),
-    ('DOOR', stat.S_ISDOOR),
-]
+def cancel_futures(*futures):
+    for future in futures:
+        future.cancel()
 
 
-async def url_player():
-    mode = os.stat(sys.stdin.fileno()).st_mode
-    logger.debug(
-        'stdin mode: %o %s', mode,
-        ' '.join(label for label, check in _MODES if check(mode)),
-    )
-    input_stream = sys.stdin
-    input_stream = await AsyncTextStream.make(input_stream)
-    play_channel = Channel()
-    player_future = asyncio.ensure_future(play_streams(play_channel))
-    async with play_channel:
-        async for video_url in input_stream:
-            if not video_url:
-                break
+async def play_urls(file):
+    buffered_songs = Channel()
+    player_future = asyncio.ensure_future(play_songs(buffered_songs))
+    async with buffered_songs:
+        for video_url in file:
+            video_url = video_url.rstrip()
             print(video_url)
             song = Song(video_url)
-            await song.download()
-            await play_channel.put(song)
+            await song.start_buffering()
+            await buffered_songs.put(song)
     await player_future
 
 
-async def play_streams(play_channel):
+async def play_songs(buffered_songs):
     while True:
-        song = await play_channel.get()
+        song = await buffered_songs.get()
         if song is Channel.DONE:
             break
         await song.play()
@@ -75,11 +59,11 @@ class Song:
         self.url = url
         self.buffer = None
 
-    async def download(self):
+    async def start_buffering(self):
         reader, writer = os.pipe()
         proc = await self.youtube_dl(self.url, writer)
         logger.info('Buffering %s %s', self, proc)
-        asyncio.ensure_future(wait_for_proc(proc, writer))
+        AsyncProcesses.wait_for_proc(proc, writer)
         self.buffer = reader
 
     @staticmethod
@@ -92,7 +76,7 @@ class Song:
     async def play(self):
         proc = await self.start_player(self.buffer)
         logger.info('Playing %s %s', self, proc)
-        await wait_for_proc(proc, self.buffer)
+        await AsyncProcesses.wait_for_proc(proc, self.buffer)
         logger.info('Player exited %s', self)
 
     @staticmethod
@@ -104,47 +88,6 @@ class Song:
 
     def __repr__(self):
         return 'Song({!r})'.format(self.url)
-
-
-async def wait_for_proc(proc, *pipes):
-    logger.debug('Setup wait for proc %s', proc)
-    await proc.wait()
-    logger.debug('Cleaning up proc %s', proc)
-    for pipe in pipes:
-        os.close(pipe)
-
-
-class AsyncStream:
-
-    """Wrap a regular file object for async access."""
-
-    @classmethod
-    async def make(cls, pipe):
-        reader = asyncio.StreamReader()
-        reader_protocol = asyncio.StreamReaderProtocol(reader)
-        loop = asyncio.get_event_loop()
-        await loop.connect_read_pipe(lambda: reader_protocol, pipe)
-        return cls(reader)
-
-    def __init__(self, reader):
-        self.reader = reader
-
-    async def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        return await self.readline()
-
-    async def readline(self):
-        return await self.reader.readline()
-
-
-class AsyncTextStream(AsyncStream):
-
-    async def readline(self):
-        line = await super().readline()
-        line = line.decode().rstrip()
-        return line
 
 
 class Channel(asyncio.Queue):
@@ -167,6 +110,42 @@ class Channel(asyncio.Queue):
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.close()
+
+
+class AsyncProcesses:
+
+    processes = set()
+
+    @classmethod
+    def wait_for_proc(cls, proc, *pipes):
+        wait_coro = cls._wait_for_proc(proc, *pipes)
+        wait_future = asyncio.ensure_future(wait_coro)
+        cls.add_proc(wait_future)
+        wait_future.add_done_callback(cls.remove_proc)
+        return wait_future
+
+    @classmethod
+    def add_proc(cls, future):
+        cls.processes.add(future)
+        logger.debug('number of procs: %d', len(cls.processes))
+
+    @classmethod
+    def remove_proc(cls, future):
+        cls.processes.discard(future)
+        logger.debug('number of procs: %d', len(cls.processes))
+
+    @staticmethod
+    async def _wait_for_proc(proc, *pipes):
+        logger.debug('Set up wait for %s', proc)
+        await proc.wait()
+        logger.debug('Cleaning up %s', proc)
+        for pipe in pipes:
+            os.close(pipe)
+
+    @classmethod
+    def cleanup(cls):
+        cancel_futures(*list(cls.processes))
+        cls.processes.clear()
 
 
 if __name__ == '__main__':
