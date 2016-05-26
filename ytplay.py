@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def main():
     logging.basicConfig(level='DEBUG')
     loop = asyncio.get_event_loop()
-    future = loop.create_future(url_player())
+    future = loop.create_task(url_player())
     loop.add_signal_handler(signal.SIGINT, cancel_futures_callback(future))
     try:
         loop.run_until_complete(future)
