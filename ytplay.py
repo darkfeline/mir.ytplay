@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import signal
+import stat
 import sys
 
 logger = logging.getLogger(__name__)
@@ -9,13 +11,42 @@ logger = logging.getLogger(__name__)
 def main():
     logging.basicConfig(level='DEBUG')
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(url_player())
-    loop.close()
+    future = loop.create_future(url_player())
+    loop.add_signal_handler(signal.SIGINT, cancel_futures_callback(future))
+    try:
+        loop.run_until_complete(future)
+    finally:
+        loop.close()
+
+
+def cancel_futures_callback(*futures):
+    def cancel_futures():
+        logger.info('Canceling futures')
+        loop = asyncio.get_event_loop()
+        for future in futures:
+            future.cancel()
+            loop.run_until_complete(future)
+    return cancel_futures
+
+
+_MODES = [
+    ('FIFO', stat.S_ISFIFO),
+    ('SOCK', stat.S_ISSOCK),
+    ('CHR', stat.S_ISCHR),
+    ('BLK', stat.S_ISBLK),
+    ('REG', stat.S_ISREG),
+    ('DOOR', stat.S_ISDOOR),
+]
 
 
 async def url_player():
-    loop = asyncio.get_event_loop()
-    input_stream = await AsyncTextStream.make(loop, sys.stdin)
+    mode = os.stat(sys.stdin.fileno()).st_mode
+    logger.debug(
+        'stdin mode: %o %s', mode,
+        ' '.join(label for label, check in _MODES if check(mode)),
+    )
+    input_stream = sys.stdin
+    input_stream = await AsyncTextStream.make(input_stream)
     buffer_channel = Channel()
     play_channel = Channel()
     await asyncio.gather(
@@ -41,7 +72,7 @@ async def buffer_streams(buffer_channel, play_channel):
             song = await buffer_channel.get()
             if song is Channel.DONE:
                 break
-            await song.buffer()
+            await song.download()
             await play_channel.put(song)
 
 
@@ -57,17 +88,15 @@ class Song:
 
     def __init__(self, url):
         self.url = url
-        self.buffer_proc = None
-        self.buffer_out = None
-        self.buffer_in = None
-        self.player_proc = None
+        self.buffer = None
 
-    async def buffer(self):
-        self.buffer_out, self.buffer_in = os.pipe()
+    async def download(self):
+        reader, writer = os.pipe()
         logger.info('Buffering %s', self)
-        self.buffer_proc = await self.youtube_dl(self.url, self.buffer_in)
+        proc = await self.youtube_dl(self.url, writer)
         loop = asyncio.get_event_loop()
-        loop.create_task(wait_for_proc(self.buffer_proc, self.buffer_in))
+        loop.create_task(wait_for_proc(proc, writer))
+        self.buffer = reader
 
     @staticmethod
     async def youtube_dl(video_url, pipe):
@@ -78,9 +107,8 @@ class Song:
 
     async def play(self):
         logger.info('Playing %s', self)
-        self.player_proc = await self.start_player(self.buffer_out)
-        await self.player_proc.wait()
-        os.close(self.buffer_out)
+        proc = await self.start_player(self.buffer)
+        await wait_for_proc(proc, self.buffer)
         logger.info('Player exited %s', self)
 
     @staticmethod
@@ -92,20 +120,6 @@ class Song:
 
     def __repr__(self):
         return 'Song({!r})'.format(self.url)
-
-    def __str__(self):
-        return 'Song {!s} {}'.format(self.url, self.status)
-
-    @property
-    def status(self):
-        if self.buffer_proc is None:
-            return 'Queued'
-        elif self.player_proc is None:
-            return 'Buffering'
-        elif self.player_proc.returncode < 0:
-            return 'Playing'
-        else:
-            return 'Finished'
 
 
 async def wait_for_proc(proc, *pipes):
@@ -119,9 +133,10 @@ class AsyncStream:
     """Wrap a regular file object for async access."""
 
     @classmethod
-    async def make(cls, loop, pipe):
-        reader = asyncio.StreamReader(loop=loop)
+    async def make(cls, pipe):
+        reader = asyncio.StreamReader()
         reader_protocol = asyncio.StreamReaderProtocol(reader)
+        loop = asyncio.get_event_loop()
         await loop.connect_read_pipe(lambda: reader_protocol, pipe)
         return cls(reader)
 
