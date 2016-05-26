@@ -27,6 +27,8 @@ async def url_player(loop):
 async def read_urls(input_stream, url_channel):
     async with url_channel:
         async for video_url in input_stream:
+            if not video_url:
+                break
             print(video_url)
             await url_channel.put(video_url)
 
