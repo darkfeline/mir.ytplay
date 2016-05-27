@@ -7,8 +7,6 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-# pylint: disable=unnecessary-lambda
-
 
 def main():
     logging.basicConfig(level='DEBUG')
