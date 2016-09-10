@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
-from setuptools import find_packages, setup
+from setuptools import setup
 
 setup(
     name='mir.ytplay',
-    version='0.1.1',
+    version='0.1.2',
     description='Stream music from YouTube.',
     long_description='',
     keywords='',
-    url='',
+    url='https://github.com/darkfeline/mir.ytplay',
     author='Allen Li',
     author_email='darkfeline@felesatra.moe',
     license='',
@@ -20,7 +20,7 @@ setup(
         'Topic :: Internet',
     ],
 
-    packages=find_packages(),
+    py_modules=['mir.ytplay'],
     entry_points={
         'console_scripts': [
             'ytplay = mir.ytplay:main',
