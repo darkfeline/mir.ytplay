@@ -11,7 +11,6 @@ setup(
     url='https://github.com/darkfeline/mir.ytplay',
     author='Allen Li',
     author_email='darkfeline@felesatra.moe',
-    license='',
     classifiers=[
         'Development Status :: 4 - Beta',
         'Environment :: Console',
