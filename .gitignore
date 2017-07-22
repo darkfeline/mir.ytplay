@@ -1,5 +1,12 @@
-*.egg-info/
 __pycache__/
 
-/dist/
+# Build artifacts
 /build/
+/dist/
+/*.egg-info/
+
+# Test artifacts
+/.cache/
+/.coverage
+/.tox/
+/.pytest/

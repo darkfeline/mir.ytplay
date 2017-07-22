@@ -1,5 +1,15 @@
-ytplay
-======
+mir.ytplay
+==========
+
+.. image:: https://circleci.com/gh/darkfeline/mir.ytplay.svg?style=shield
+   :target: https://circleci.com/gh/darkfeline/mir.ytplay
+   :alt: CircleCI
+.. image:: https://codecov.io/gh/darkfeline/mir.ytplay/branch/master/graph/badge.svg
+   :target: https://codecov.io/gh/darkfeline/mir.ytplay
+   :alt: Codecov
+.. image:: https://badge.fury.io/py/mir.ytplay.svg
+   :target: https://badge.fury.io/py/mir.ytplay
+   :alt: PyPI Release
 
 ytplay is a simple program made to solve a specific problem.
 

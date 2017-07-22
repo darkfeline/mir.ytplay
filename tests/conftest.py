@@ -12,24 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from setuptools import setup
+import pathlib
 
-setup(
-    name='mir.ytplay',
-    version='0.2.0',
-    description='Stream music from YouTube.',
-    long_description='',
-    keywords='',
-    url='https://github.com/darkfeline/mir.ytplay',
-    author='Allen Li',
-    author_email='darkfeline@felesatra.moe',
-    classifiers=[
-        'Development Status :: 4 - Beta',
-        'Intended Audience :: End Users/Desktop',
-        'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 3.6',
-    ],
+import pytest
 
-    packages=['mir.ytplay'],
-    install_requires=[],
-)
+
+@pytest.fixture
+def tmpdir(tmpdir_factory):
+    tmpdir = tmpdir_factory.mktemp('tmpdir')
+    return pathlib.Path(str(tmpdir))

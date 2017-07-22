@@ -12,24 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from setuptools import setup
+import asyncio
+import logging
+import sys
 
-setup(
-    name='mir.ytplay',
-    version='0.2.0',
-    description='Stream music from YouTube.',
-    long_description='',
-    keywords='',
-    url='https://github.com/darkfeline/mir.ytplay',
-    author='Allen Li',
-    author_email='darkfeline@felesatra.moe',
-    classifiers=[
-        'Development Status :: 4 - Beta',
-        'Intended Audience :: End Users/Desktop',
-        'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 3.6',
-    ],
+from mir import ytplay
 
-    packages=['mir.ytplay'],
-    install_requires=[],
-)
+__version__ = '0.2.0'
+
+logger = logging.getLogger(__name__)
+
+
+def main():
+    logging.basicConfig(level='DEBUG')
+    loop = asyncio.get_event_loop()
+    loop.set_debug(True)
+    loop.run_until_complete(ytplay.play_urls(loop, sys.stdin))
+
+
+if __name__ == '__main__':
+    main()
